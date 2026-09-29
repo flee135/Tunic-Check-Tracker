@@ -1,6 +1,15 @@
+# Third-Party Notices
+
+## Tunic Randomizer
+
+`locations.json` contains the list of checks taken from
+[Tunic Randomizer](https://github.com/silent-destroyer/tunic-randomizer) by silentdestroyer.
+It is used under the following license.
+
+```
 MIT License
 
-Copyright (c) 2026 Flee
+Copyright (c) 2023 silentdestroyer
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +28,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```

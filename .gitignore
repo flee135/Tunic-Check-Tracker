@@ -1,0 +1,7 @@
+__pycache__/
+settings.json
+
+# PyInstaller
+build/
+dist/
+*.spec
