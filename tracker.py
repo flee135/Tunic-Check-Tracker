@@ -2,12 +2,14 @@
 
 Tails the BepInEx log and marks off checks as the player collects them.
 - "Starting new single player file with seed: N" resets the tracker.
+- "Loading single player seed: <settings string>" gives the seed and which shuffles are on.
 - "Picked up item <key> (<item>)" marks that check as done.
 - "Entering scene <scene> (<n>)" moves that scene's checks to the top of the list.
 
 Usage: python tracker.py [path\\to\\LogOutput.log]
 Pick the log from Settings > Select Log File. The choice is saved in settings.json.
 """
+import base64
 import ctypes
 import json
 import re
@@ -19,6 +21,22 @@ from tkinter import filedialog, ttk
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 SETTINGS_FILE = APP_DIR / "settings.json"
 NEW_FILE = "Starting new single player file with seed: "
+# Logged every time a save loads, new or continued. See parse_seed_settings.
+LOAD_SEED = "Loading single player seed: "
+# The randomizer version SHUFFLE_BITS and locations.json come from.
+RANDOMIZER_VERSION = "5.0.2"
+# Bit positions in the settings string's logic flags (RandomizerSettings.logicSettings in the
+# randomizer).
+SHUFFLE_BITS = {
+    "grass": 11,
+    "breakables": 16,
+    "fuses": 17,
+    "bells": 18,
+    "enemy drops": 22,
+    "extra enemy drops": 23,
+}
+# Shuffles whose checks are in locations.json.
+SUPPORTED_SHUFFLES = set()
 # "Picked up item <id> [<scene>] (<item>)". The item name can contain brackets and
 # parentheses, so stop at the first "] (".
 PICKUP_RE = re.compile(r"Picked up item (.*?\]) \(")
@@ -28,10 +46,10 @@ POLL_MS = 1000
 THEMES = {
     "light": {"bg": "#f0f0f0", "fg": "#000000", "field": "#ffffff", "button": "#e1e1e1",
               "active": "#d4d4d4", "border": "#adadad", "done": "#999999", "area_done": "#2e8b57",
-              "thumb": "#c1c1c1", "thumb_active": "#a6a6a6"},
+              "thumb": "#c1c1c1", "thumb_active": "#a6a6a6", "warn": "#b35900"},
     "dark": {"bg": "#202020", "fg": "#e6e6e6", "field": "#2b2b2b", "button": "#333333",
              "active": "#454545", "border": "#3c3c3c", "done": "#7a7a7a", "area_done": "#5cc98a",
-             "thumb": "#5a5a5a", "thumb_active": "#707070"},
+             "thumb": "#5a5a5a", "thumb_active": "#707070", "warn": "#f0a848"},
 }
 
 
@@ -81,6 +99,8 @@ class Tracker:
         self.known = set(locations)
         self.done = set()
         self.seed = None
+        self.version = None
+        self.shuffles = set()
         self.scene = None
         self.scene_changed = False
         self.open_areas = set()
@@ -103,6 +123,8 @@ class Tracker:
         menubar.add_cascade(label="Settings", menu=settings_menu)
         root.config(menu=menubar)
 
+        # Shown above the status only when the seed's randomizer version isn't RANDOMIZER_VERSION.
+        self.warning = ttk.Label(root, font=("Segoe UI", 10, "bold"), padding=(6, 6, 6, 0), wraplength=440)
         self.status = ttk.Label(root, font=("Segoe UI", 11, "bold"), padding=(6, 6, 6, 0), wraplength=440)
         self.status.pack(fill="x")
         controls = ttk.Frame(root, padding=6)
@@ -146,6 +168,7 @@ class Tracker:
         style.map("TScrollbar", background=[("active", c["thumb_active"])])
         self.tree.tag_configure("area_done", foreground=c["area_done"])
         self.tree.tag_configure("done", foreground=c["done"])
+        self.warning.configure(foreground=c["warn"])
         self.root.configure(bg=c["bg"])
         set_title_bar_dark(self.root, dark)
 
@@ -195,11 +218,22 @@ class Tracker:
     def reset(self, seed=None):
         self.done.clear()
         self.seed = seed
+        self.version = None
+        self.shuffles = set()
         self.dirty = True
 
     def handle_line(self, line: str):
         if NEW_FILE in line:
             self.reset(line.split(NEW_FILE, 1)[1].strip())
+        elif LOAD_SEED in line:
+            parsed = parse_seed_settings(line.split(LOAD_SEED, 1)[1].strip())
+            if parsed:
+                version, seed, shuffles = parsed
+                if seed != self.seed:
+                    self.reset(seed)
+                self.version = version
+                self.shuffles = shuffles
+                self.dirty = True
         elif m := PICKUP_RE.search(line):
             self.mark(m.group(1))
         elif m := SCENE_RE.search(line):
@@ -240,7 +274,23 @@ class Tracker:
             return
         total =sum(len(c) for c in self.areas.values())
         seed = f"Seed {self.seed}  —  " if self.seed else ""
-        self.status.config(text=f"{seed}{len(self.done)} / {total} checks")
+        status = f"{seed}{len(self.done)} / {total} checks"
+        supported = [s for s in SHUFFLE_BITS if s in self.shuffles and s in SUPPORTED_SHUFFLES]
+        unsupported = [s for s in SHUFFLE_BITS if s in self.shuffles and s not in SUPPORTED_SHUFFLES]
+        if supported:
+            status += "\nShuffled: " + ", ".join(supported)
+        self.status.config(text=status)
+        warnings = []
+        if self.version and self.version != RANDOMIZER_VERSION:
+            warnings.append(f"⚠ This seed uses randomizer {self.version}, but the tracker is made "
+                            f"for {RANDOMIZER_VERSION}. The settings and checks may be incorrect.")
+        if unsupported:
+            warnings.append("⚠ The following settings are on, but not supported: " + ", ".join(unsupported))
+        if warnings:
+            self.warning.config(text="\n".join(warnings))
+            self.warning.pack(fill="x", before=self.status)
+        else:
+            self.warning.pack_forget()
         # Scenes with no checks (like the Windmill) have no area.
         current = self.scene_areas.get(self.scene)
 
@@ -281,6 +331,25 @@ class Tracker:
                 # A blank row to separate the current scene from the rest.
                 self.tree.insert("", "end", text="")
         self.tree.yview_moveto(scroll_pos)
+
+
+def parse_seed_settings(text: str) -> tuple[str, str, set[str]] | None:
+    """Reads the randomizer's settings string: "tunc:<version>:<seed>:<base64 settings>".
+
+    The base64 part decodes to ":"-separated fields. Field 8 is a number whose bits are the
+    logic settings. Returns (version, seed, names of the shuffles that are on), or None if the
+    string isn't a settings string. If only the settings can't be decoded (for example, another
+    randomizer version changed the format), the shuffles come back empty.
+    """
+    parts = text.split(":", 3)
+    if len(parts) != 4 or parts[0] != "tunc":
+        return None
+    try:
+        fields = base64.b64decode(parts[3]).decode("utf-8").split(":")
+        logic = int(fields[8])
+    except (ValueError, IndexError):
+        logic = 0
+    return parts[1], parts[2], {name for name, bit in SHUFFLE_BITS.items() if logic >> bit & 1}
 
 
 def load_settings() -> dict:
