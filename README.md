@@ -31,6 +31,11 @@ You can open the tracker before or after starting the game.
 - **Progress is lost when the game restarts.** The tracker only knows what's in the current log.
   BepInEx starts a fresh `LogOutput.log` each time TUNIC launches, so checks from earlier sessions
   are gone. If you close the game and continue the same file later, the tracker starts from zero.
+- **Archipelago games aren't supported.** The game doesn't log an Archipelago game's settings, so
+  the tracker can't tell which checks are on.
+- **Grass shuffle isn't supported.** The game only logs grass that holds a real item. Grass that
+  holds the "Grass" filler item isn't logged, so the tracker can't tick it off. When grass shuffle
+  is on, the tracker leaves grass out of the list and shows a warning.
 
 ## Run from source
 
