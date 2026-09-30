@@ -36,7 +36,7 @@ SHUFFLE_BITS = {
     "extra enemy drops": 23,
 }
 # Shuffles whose checks the tracker shows.
-SUPPORTED_SHUFFLES = set()
+SUPPORTED_SHUFFLES = {"bells"}
 # "Picked up item <id> [<scene>] (<item>)". The item name can contain brackets and
 # parentheses, so stop at the first "] (".
 PICKUP_RE = re.compile(r"Picked up item (.*?\]) \(")
@@ -84,23 +84,17 @@ class LogTail:
 
 
 class Tracker:
-    def __init__(self, root: tk.Tk, log_path: Path | None, locations: dict):
+    def __init__(self, root: tk.Tk, log_path: Path | None, location_groups: dict):
         self.root = root
         # None until the player picks a log file.
         self.tail = LogTail(log_path) if log_path else None
-        # area -> list of (key, check name), in list order
-        self.areas = {}
-        # scene name from the log -> area header. Each area is exactly one scene.
-        self.scene_areas = {}
-        for key, full_name in locations.items():
-            area, name = full_name.split(" - ", 1)
-            self.areas.setdefault(area, []).append((key, name))
-            self.scene_areas[key[key.rindex("[") + 1:-1]] = area
-        self.known = set(locations)
+        # locations.json: group name -> {key: "<area> - <check name>"}
+        self.location_groups = location_groups
         self.done = set()
         self.seed = None
         self.version = None
         self.shuffles = set()
+        self.build_areas()
         self.scene = None
         self.scene_changed = False
         self.open_areas = set()
@@ -211,6 +205,21 @@ class Tracker:
         for area in self.tree.get_children():
             self.tree.item(area, open=is_open)
 
+    def build_areas(self):
+        """Fills the check list with the base checks plus the supported shuffles that are on."""
+        # area -> list of (key, check name), in list order
+        self.areas = {}
+        # scene name from the log -> area header. Each area is exactly one scene.
+        self.scene_areas = {}
+        self.known = set()
+        groups = ["base"] + [s for s in SHUFFLE_BITS if s in self.shuffles and s in SUPPORTED_SHUFFLES]
+        for group in groups:
+            for key, full_name in self.location_groups[group].items():
+                area, name = full_name.split(" - ", 1)
+                self.areas.setdefault(area, []).append((key, name))
+                self.scene_areas[key[key.rindex("[") + 1:-1]] = area
+                self.known.add(key)
+
     def mark_dirty(self):
         self.dirty = True
         self.redraw()
@@ -219,8 +228,13 @@ class Tracker:
         self.done.clear()
         self.seed = seed
         self.version = None
-        self.shuffles = set()
+        self.set_shuffles(set())
         self.dirty = True
+
+    def set_shuffles(self, shuffles: set[str]):
+        if shuffles != self.shuffles:
+            self.shuffles = shuffles
+            self.build_areas()
 
     def handle_line(self, line: str):
         if NEW_FILE in line:
@@ -232,7 +246,7 @@ class Tracker:
                 if seed != self.seed:
                     self.reset(seed)
                 self.version = version
-                self.shuffles = shuffles
+                self.set_shuffles(shuffles)
                 self.dirty = True
         elif m := PICKUP_RE.search(line):
             self.mark(m.group(1))
@@ -243,11 +257,8 @@ class Tracker:
                 self.dirty = True
 
     def mark(self, key: str):
-        if key not in self.known:
-            # Not in the main list (e.g. grass or breakables). Show it anyway.
-            self.known.add(key)
-            self.areas.setdefault("Other", []).append((key, key))
-        if key not in self.done:
+        # Ignore pickups from shuffles the tracker doesn't show.
+        if key in self.known and key not in self.done:
             self.done.add(key)
             self.dirty = True
 
@@ -274,7 +285,7 @@ class Tracker:
             return
         total =sum(len(c) for c in self.areas.values())
         seed = f"Seed {self.seed}  —  " if self.seed else ""
-        status = f"{seed}{len(self.done)} / {total} checks"
+        status = f"{seed}{len(self.done & self.known)} / {total} checks"
         supported = [s for s in SHUFFLE_BITS if s in self.shuffles and s in SUPPORTED_SHUFFLES]
         unsupported = [s for s in SHUFFLE_BITS if s in self.shuffles and s not in SUPPORTED_SHUFFLES]
         if supported:
@@ -391,11 +402,11 @@ def ask_log_path(parent):
 
 def main():
     locations_file = Path(__file__).with_name("locations.json")
-    locations = json.loads(locations_file.read_text(encoding="utf-8"))["base"]
+    location_groups = json.loads(locations_file.read_text(encoding="utf-8"))
     saved_path = load_settings().get("log_path")
     log_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(saved_path) if saved_path else None
     root = tk.Tk()
-    Tracker(root, log_path, locations)
+    Tracker(root, log_path, location_groups)
     root.mainloop()
 
 
