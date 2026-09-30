@@ -36,6 +36,7 @@ SHUFFLE_BITS = {
     "extra enemy drops": 23,
 }
 ENTRANCE_RANDO_BIT = 5
+MYSTERY_SEED_BIT = 9
 # Shuffles whose checks the tracker shows.
 SUPPORTED_SHUFFLES = {"bells", "fuses", "breakables", "enemy drops", "extra enemy drops"}
 # "Picked up item <id> [<scene>] (<item>)". The item name can contain brackets and
@@ -91,10 +92,13 @@ class Tracker:
         self.tail = LogTail(log_path) if log_path else None
         # locations.json: group name -> {key: "<area> - <check name>"}
         self.location_groups = location_groups
+        self.key_groups = {key: group for group, checks in location_groups.items() for key in checks}
         self.done = set()
         self.seed = None
         self.version = None
         self.shuffles = set()
+        # In a mystery seed, the shuffles the player has found a check from.
+        self.revealed = set()
         self.build_areas()
         self.scene = None
         self.scene_changed = False
@@ -213,7 +217,7 @@ class Tracker:
         # scene name from the log -> area header. Each area is exactly one scene.
         self.scene_areas = {}
         self.known = set()
-        groups = ["base"] + [s for s in SHUFFLE_BITS if s in self.shuffles and s in SUPPORTED_SHUFFLES]
+        groups = ["base"] + self.shown_shuffles()
         for group in groups:
             for key, full_name in self.location_groups[group].items():
                 area, name = full_name.split(" - ", 1)
@@ -228,6 +232,12 @@ class Tracker:
                 self.areas.setdefault(scene_area, []).append((key, name))
                 self.known.add(key)
 
+    def shown_shuffles(self) -> list[str]:
+        """The supported shuffles that are on. In a mystery seed, only the ones the player has found."""
+        mystery = "mystery seed" in self.shuffles
+        return [s for s in SHUFFLE_BITS if s in self.shuffles and s in SUPPORTED_SHUFFLES
+                and (not mystery or s in self.revealed)]
+
     def mark_dirty(self):
         self.dirty = True
         self.redraw()
@@ -236,6 +246,7 @@ class Tracker:
         self.done.clear()
         self.seed = seed
         self.version = None
+        self.revealed.clear()
         self.set_shuffles(set())
         self.dirty = True
 
@@ -265,6 +276,14 @@ class Tracker:
                 self.dirty = True
 
     def mark(self, key: str):
+        group = self.key_groups.get(key)
+        if "mystery seed" in self.shuffles and group in self.shuffles and group not in self.revealed:
+            self.revealed.add(group)
+            # Extra enemy drops are only on when enemy drops are.
+            if group == "extra enemy drops":
+                self.revealed.add("enemy drops")
+            self.build_areas()
+            self.dirty = True
         # Ignore pickups from shuffles the tracker doesn't show.
         if key in self.known and key not in self.done:
             self.done.add(key)
@@ -294,10 +313,14 @@ class Tracker:
         total =sum(len(c) for c in self.areas.values())
         seed = f"Seed {self.seed}  —  " if self.seed else ""
         status = f"{seed}{len(self.done & self.known)} / {total} checks"
-        supported = [s for s in SHUFFLE_BITS if s in self.shuffles and s in SUPPORTED_SHUFFLES]
-        unsupported = [s for s in SHUFFLE_BITS if s in self.shuffles and s not in SUPPORTED_SHUFFLES]
-        if supported:
-            status += "\nShuffled: " + ", ".join(supported)
+        mystery = "mystery seed" in self.shuffles
+        shown = self.shown_shuffles()
+        unsupported = [s for s in SHUFFLE_BITS if s in self.shuffles and s not in SUPPORTED_SHUFFLES
+                       and (not mystery or s in self.revealed)]
+        if mystery:
+            status += "\nMystery seed" + (". Found: " + ", ".join(shown) if shown else "")
+        elif shown:
+            status += "\nShuffled: " + ", ".join(shown)
         self.status.config(text=status)
         warnings = []
         if self.version and self.version != RANDOMIZER_VERSION:
@@ -357,7 +380,7 @@ def parse_seed_settings(text: str) -> tuple[str, str, set[str]] | None:
 
     The base64 part decodes to ":"-separated fields. Field 8 is a number whose bits are the
     logic settings. Returns (version, seed, names of the shuffles that are on, plus
-    "entrance rando" if that's on), or None if the
+    "entrance rando" and "mystery seed" if those are on), or None if the
     string isn't a settings string. If only the settings can't be decoded (for example, another
     randomizer version changed the format), the shuffles come back empty.
     """
@@ -372,6 +395,8 @@ def parse_seed_settings(text: str) -> tuple[str, str, set[str]] | None:
     shuffles = {name for name, bit in SHUFFLE_BITS.items() if logic >> bit & 1}
     if logic >> ENTRANCE_RANDO_BIT & 1:
         shuffles.add("entrance rando")
+    if logic >> MYSTERY_SEED_BIT & 1:
+        shuffles.add("mystery seed")
     # The randomizer ignores extra enemy drops unless enemy drops is on.
     if "enemy drops" not in shuffles:
         shuffles.discard("extra enemy drops")
