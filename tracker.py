@@ -8,6 +8,7 @@ Tails the BepInEx log and marks off checks as the player collects them.
 Usage: python tracker.py [path\\to\\LogOutput.log]
 Pick the log from Settings > Select Log File. The choice is saved in settings.json.
 """
+import ctypes
 import json
 import re
 import sys
@@ -24,6 +25,14 @@ PICKUP_RE = re.compile(r"Picked up item (.*?\]) \(")
 # "Entering scene <scene name> (<scene number>)"
 SCENE_RE = re.compile(r"Entering scene (.*) \(\d+\)")
 POLL_MS = 1000
+THEMES = {
+    "light": {"bg": "#f0f0f0", "fg": "#000000", "field": "#ffffff", "button": "#e1e1e1",
+              "active": "#d4d4d4", "border": "#adadad", "done": "#999999", "area_done": "#2e8b57",
+              "thumb": "#c1c1c1", "thumb_active": "#a6a6a6"},
+    "dark": {"bg": "#202020", "fg": "#e6e6e6", "field": "#2b2b2b", "button": "#333333",
+             "active": "#454545", "border": "#3c3c3c", "done": "#7a7a7a", "area_done": "#5cc98a",
+             "thumb": "#5a5a5a", "thumb_active": "#707070"},
+}
 
 
 class LogTail:
@@ -80,9 +89,13 @@ class Tracker:
         root.title("Tunic Check Tracker")
         root.geometry("460x720")
 
+        settings = load_settings()
+        self.dark_mode = tk.BooleanVar(value=settings.get("dark_mode", False))
         menubar = tk.Menu(root)
         settings_menu = tk.Menu(menubar, tearoff=False)
         settings_menu.add_command(label="Select Log File...", command=self.change_log)
+        settings_menu.add_checkbutton(label="Dark mode", variable=self.dark_mode,
+                                      command=self.toggle_dark_mode)
         menubar.add_cascade(label="Settings", menu=settings_menu)
         root.config(menu=menubar)
 
@@ -92,7 +105,7 @@ class Tracker:
         controls.pack(fill="x")
         ttk.Button(controls, text="Expand all", command=lambda: self.set_all_open(True)).pack(side="left")
         ttk.Button(controls, text="Collapse all", command=lambda: self.set_all_open(False)).pack(side="left", padx=(6, 0))
-        self.hide_done = tk.BooleanVar(value=load_settings().get("hide_done", False))
+        self.hide_done = tk.BooleanVar(value=settings.get("hide_done", False))
         ttk.Checkbutton(controls, text="Hide completed", variable=self.hide_done,
                         command=self.toggle_hide_done).pack(side="right")
 
@@ -104,11 +117,37 @@ class Tracker:
         scroll.pack(side="right", fill="y")
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.tag_configure("area", font=("Segoe UI", 10, "bold"))
-        self.tree.tag_configure("area_done", font=("Segoe UI", 10, "bold"), foreground="#2e8b57")
-        self.tree.tag_configure("done", foreground="#999999")
+        self.tree.tag_configure("area_done", font=("Segoe UI", 10, "bold"))
         self.tree.bind("<Button-1>", self.on_click)
 
+        self.apply_theme()
         self.poll()
+
+    def apply_theme(self):
+        dark = self.dark_mode.get()
+        c = THEMES["dark" if dark else "light"]
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["field"],
+                        bordercolor=c["border"], lightcolor=c["bg"], darkcolor=c["bg"],
+                        troughcolor=c["bg"], arrowcolor=c["fg"], focuscolor=c["fg"])
+        style.map(".", background=[("disabled", c["bg"]), ("active", c["active"])])
+        style.configure("TButton", background=c["button"])
+        style.map("TButton", background=[("pressed", c["border"]), ("active", c["active"])])
+        style.configure("TCheckbutton", indicatorbackground=c["field"], indicatorforeground=c["fg"])
+        style.map("TCheckbutton", background=[("active", c["bg"])],
+                  indicatorbackground=[("pressed", c["active"]), ("active", c["field"])])
+        style.configure("Treeview", background=c["field"], fieldbackground=c["field"], foreground=c["fg"])
+        style.configure("TScrollbar", background=c["thumb"])
+        style.map("TScrollbar", background=[("active", c["thumb_active"])])
+        self.tree.tag_configure("area_done", foreground=c["area_done"])
+        self.tree.tag_configure("done", foreground=c["done"])
+        self.root.configure(bg=c["bg"])
+        set_title_bar_dark(self.root, dark)
+
+    def toggle_dark_mode(self):
+        save_setting("dark_mode", self.dark_mode.get())
+        self.apply_theme()
 
     def on_click(self, event):
         """Clicking a check toggles it between done and not done."""
@@ -247,6 +286,19 @@ def save_setting(key: str, value):
     settings = load_settings()
     settings[key] = value
     SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+
+def set_title_bar_dark(root: tk.Tk, dark: bool):
+    """Asks Windows to draw the title bar dark or light. Does nothing on other systems."""
+    if sys.platform != "win32":
+        return
+    root.update_idletasks()
+    hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+    value = ctypes.c_int(dark)
+    # Attribute 20 is dark mode. Windows 10 before version 20H1 uses 19 instead.
+    for attr in (20, 19):
+        if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)) == 0:
+            break
 
 
 def ask_log_path(parent):
