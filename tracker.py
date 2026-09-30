@@ -35,6 +35,7 @@ SHUFFLE_BITS = {
     "enemy drops": 22,
     "extra enemy drops": 23,
 }
+ENTRANCE_RANDO_BIT = 5
 # Shuffles whose checks the tracker shows.
 SUPPORTED_SHUFFLES = {"bells", "fuses", "breakables", "enemy drops", "extra enemy drops"}
 # "Picked up item <id> [<scene>] (<item>)". The item name can contain brackets and
@@ -217,6 +218,8 @@ class Tracker:
             for key, full_name in self.location_groups[group].items():
                 area, name = full_name.split(" - ", 1)
                 scene = key[key.rindex("[") + 1:-1]
+                if group == "breakables" and scene == "Purgatory" and "entrance rando" not in self.shuffles:
+                    continue
                 scene_area = self.scene_areas.setdefault(scene, area)
                 if area != scene_area:
                     # A few shuffles name a scene differently, e.g. "Well Boss" for the Sewer_Boss
@@ -353,7 +356,8 @@ def parse_seed_settings(text: str) -> tuple[str, str, set[str]] | None:
     """Reads the randomizer's settings string: "tunc:<version>:<seed>:<base64 settings>".
 
     The base64 part decodes to ":"-separated fields. Field 8 is a number whose bits are the
-    logic settings. Returns (version, seed, names of the shuffles that are on), or None if the
+    logic settings. Returns (version, seed, names of the shuffles that are on, plus
+    "entrance rando" if that's on), or None if the
     string isn't a settings string. If only the settings can't be decoded (for example, another
     randomizer version changed the format), the shuffles come back empty.
     """
@@ -366,6 +370,8 @@ def parse_seed_settings(text: str) -> tuple[str, str, set[str]] | None:
     except (ValueError, IndexError):
         logic = 0
     shuffles = {name for name, bit in SHUFFLE_BITS.items() if logic >> bit & 1}
+    if logic >> ENTRANCE_RANDO_BIT & 1:
+        shuffles.add("entrance rando")
     # The randomizer ignores extra enemy drops unless enemy drops is on.
     if "enemy drops" not in shuffles:
         shuffles.discard("extra enemy drops")
