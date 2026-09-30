@@ -5,6 +5,8 @@ Tails the BepInEx log and marks off checks as the player collects them.
 - "Loading single player seed: <settings string>" gives the seed and which shuffles are on.
 - "Picked up item <key> (<item>)" marks that check as done.
 - "Entering scene <scene> (<n>)" moves that scene's checks to the top of the list.
+- "Starting new archipelago file" or "Loading archipelago seed" clears the list. Archipelago
+  games aren't supported.
 
 Usage: python tracker.py [path\\to\\LogOutput.log]
 Pick the log from Settings > Select Log File. The choice is saved in settings.json.
@@ -23,6 +25,7 @@ SETTINGS_FILE = APP_DIR / "settings.json"
 NEW_FILE = "Starting new single player file with seed: "
 # Logged every time a save loads, new or continued. See parse_seed_settings.
 LOAD_SEED = "Loading single player seed: "
+ARCHIPELAGO_LINES = ("Starting new archipelago file with seed: ", "Loading archipelago seed: ")
 # The randomizer version SHUFFLE_BITS and locations.json come from.
 RANDOMIZER_VERSION = "5.0.2"
 # Bit positions in the settings string's logic flags (RandomizerSettings.logicSettings in the
@@ -99,6 +102,7 @@ class Tracker:
         self.shuffles = set()
         # In a mystery seed, the shuffles the player has found a check from.
         self.revealed = set()
+        self.archipelago = False
         self.build_areas()
         self.scene = None
         self.scene_changed = False
@@ -247,6 +251,7 @@ class Tracker:
         self.seed = seed
         self.version = None
         self.revealed.clear()
+        self.archipelago = False
         self.set_shuffles(set())
         self.dirty = True
 
@@ -267,6 +272,10 @@ class Tracker:
                 self.version = version
                 self.set_shuffles(shuffles)
                 self.dirty = True
+        elif any(text in line for text in ARCHIPELAGO_LINES):
+            if not self.archipelago:
+                self.reset()
+                self.archipelago = True
         elif m := PICKUP_RE.search(line):
             self.mark(m.group(1))
         elif m := SCENE_RE.search(line):
@@ -276,6 +285,8 @@ class Tracker:
                 self.dirty = True
 
     def mark(self, key: str):
+        if self.archipelago:
+            return
         group = self.key_groups.get(key)
         if "mystery seed" in self.shuffles and group in self.shuffles and group not in self.revealed:
             self.revealed.add(group)
@@ -308,6 +319,12 @@ class Tracker:
             # Keep the list empty until there's a log to read.
             self.status.config(text="Go to Settings > Select Log File and choose LogOutput.log "
                                      "in your TUNIC/BepInEx folder to start tracking.")
+            self.tree.delete(*self.tree.get_children())
+            return
+        if self.archipelago:
+            self.status.config(text="Archipelago games aren't supported. "
+                                    "Start or load a single player game to track it.")
+            self.warning.pack_forget()
             self.tree.delete(*self.tree.get_children())
             return
         total =sum(len(c) for c in self.areas.values())
