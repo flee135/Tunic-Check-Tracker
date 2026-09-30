@@ -1,42 +1,51 @@
-"""Pull the list of all checks out of TunicRandomizer.dll and save it as locations.json.
+"""Download the list of all checks from the Tunic Randomizer repo and save it as locations.json.
 
-The randomizer stores its location list as a JSON string inside the DLL, mapping
-"<id> [<scene>]" to "<area> - <check name>". Re-run this after updating the randomizer.
+The randomizer keeps its location list as a JSON string in src/Data/Locations.cs, mapping
+"<id> [<scene>]" to "<area> - <check name>". Re-run this after the randomizer updates.
 
-Usage: python extract_locations.py path\\to\\TunicRandomizer.dll
+Usage: python extract_locations.py <release tag>
+For example: python extract_locations.py 5.0.2
 """
 import json
 import re
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-# A check that is always in the list, used to find the right JSON object.
-ANCHOR = '"19 [Sword Cave]":"Stick House - Stick Chest"'
+SOURCE_URL = "https://raw.githubusercontent.com/silent-destroyer/tunic-randomizer/{tag}/src/Data/Locations.cs"
+# The C# line: public static string LocationNamesJson = "{...}";
+LOCATION_NAMES_JSON_RE = re.compile(r'LocationNamesJson = ("(?:[^"\\]|\\.)*");')
 
 
-def find_location_json(data: bytes) -> dict:
-    # .NET stores string literals as UTF-16. Try both byte alignments.
-    for offset in (0, 1):
-        text = data[offset:].decode("utf-16-le", errors="replace")
-        i = text.find(ANCHOR)
-        if i == -1:
-            continue
-        start = text.rfind("{", 0, i)
-        end = text.find("}", i)
-        return json.loads(text[start:end + 1])
-    raise SystemExit("Could not find the location list in the DLL.")
+def download_source(tag: str) -> str:
+    url = SOURCE_URL.format(tag=tag)
+    try:
+        with urllib.request.urlopen(url) as response:
+            return response.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise SystemExit(f"Could not find Locations.cs for tag '{tag}'. Check the tag name.")
+        raise SystemExit(f"Download failed: {e}")
+    except urllib.error.URLError as e:
+        raise SystemExit(f"Download failed: {e.reason}")
+
+
+def find_location_json(source: str) -> dict:
+    m = LOCATION_NAMES_JSON_RE.search(source)
+    if not m:
+        raise SystemExit("Could not find LocationNamesJson in Locations.cs.")
+    # The C# string literal uses the same escapes as JSON, so decode it as a JSON string first.
+    return json.loads(json.loads(m.group(1)))
 
 
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit(r"Usage: python extract_locations.py path\to\TunicRandomizer.dll")
-    dll = Path(sys.argv[1])
-    if not dll.is_file():
-        raise SystemExit(f"File not found: {dll}")
-    locations = find_location_json(dll.read_bytes())
-    bad = [k for k in locations if re.search(r" - ", k)]
+        raise SystemExit("Usage: python extract_locations.py <release tag>")
+    locations = find_location_json(download_source(sys.argv[1]))
+    bad = [v for v in locations.values() if " - " not in v]
     if bad:
-        raise SystemExit(f"Unexpected location keys containing ' - ': {bad}")
+        raise SystemExit(f"Location names missing the ' - ' between area and check: {bad}")
     out = Path(__file__).with_name("locations.json")
     out.write_text(json.dumps(locations, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Wrote {len(locations)} locations to {out}")

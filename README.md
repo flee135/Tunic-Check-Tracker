@@ -48,10 +48,11 @@ python tracker.py "path\to\LogOutput.log"
 
 ## Updating the check list
 
-`locations.json` comes from the randomizer's DLL. After the randomizer updates, run this to rebuild it:
+`locations.json` comes from the [Tunic Randomizer repo](https://github.com/silent-destroyer/tunic-randomizer).
+After the randomizer updates, run this with the new release tag to rebuild it:
 
 ```
-python extract_locations.py "path\to\TunicRandomizer.dll"
+python extract_locations.py 5.0.2
 ```
 
 ## Credits
