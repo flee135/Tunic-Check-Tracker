@@ -3,14 +3,13 @@
 The randomizer stores its location list as a JSON string inside the DLL, mapping
 "<id> [<scene>]" to "<area> - <check name>". Re-run this after updating the randomizer.
 
-Usage: python extract_locations.py [path\\to\\TunicRandomizer.dll]
+Usage: python extract_locations.py path\\to\\TunicRandomizer.dll
 """
 import json
 import re
 import sys
 from pathlib import Path
 
-DEFAULT_DLL = r"E:\Steam\steamapps\common\TUNIC\BepInEx\plugins\Tunic Randomizer\TunicRandomizer.dll"
 # A check that is always in the list, used to find the right JSON object.
 ANCHOR = '"19 [Sword Cave]":"Stick House - Stick Chest"'
 
@@ -29,7 +28,11 @@ def find_location_json(data: bytes) -> dict:
 
 
 def main():
-    dll = Path(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DLL)
+    if len(sys.argv) != 2:
+        raise SystemExit(r"Usage: python extract_locations.py path\to\TunicRandomizer.dll")
+    dll = Path(sys.argv[1])
+    if not dll.is_file():
+        raise SystemExit(f"File not found: {dll}")
     locations = find_location_json(dll.read_bytes())
     bad = [k for k in locations if re.search(r" - ", k)]
     if bad:
