@@ -36,7 +36,7 @@ SHUFFLE_BITS = {
     "extra enemy drops": 23,
 }
 # Shuffles whose checks the tracker shows.
-SUPPORTED_SHUFFLES = {"bells"}
+SUPPORTED_SHUFFLES = {"bells", "fuses", "breakables", "enemy drops", "extra enemy drops"}
 # "Picked up item <id> [<scene>] (<item>)". The item name can contain brackets and
 # parentheses, so stop at the first "] (".
 PICKUP_RE = re.compile(r"Picked up item (.*?\]) \(")
@@ -216,8 +216,13 @@ class Tracker:
         for group in groups:
             for key, full_name in self.location_groups[group].items():
                 area, name = full_name.split(" - ", 1)
-                self.areas.setdefault(area, []).append((key, name))
-                self.scene_areas[key[key.rindex("[") + 1:-1]] = area
+                scene = key[key.rindex("[") + 1:-1]
+                scene_area = self.scene_areas.setdefault(scene, area)
+                if area != scene_area:
+                    # A few shuffles name a scene differently, e.g. "Well Boss" for the Sewer_Boss
+                    # scene that's "Dark Tomb Checkpoint" in base. Keep one area per scene.
+                    name = f"[{area}] {name}"
+                self.areas.setdefault(scene_area, []).append((key, name))
                 self.known.add(key)
 
     def mark_dirty(self):
@@ -360,7 +365,11 @@ def parse_seed_settings(text: str) -> tuple[str, str, set[str]] | None:
         logic = int(fields[8])
     except (ValueError, IndexError):
         logic = 0
-    return parts[1], parts[2], {name for name, bit in SHUFFLE_BITS.items() if logic >> bit & 1}
+    shuffles = {name for name, bit in SHUFFLE_BITS.items() if logic >> bit & 1}
+    # The randomizer ignores extra enemy drops unless enemy drops is on.
+    if "enemy drops" not in shuffles:
+        shuffles.discard("extra enemy drops")
+    return parts[1], parts[2], shuffles
 
 
 def load_settings() -> dict:
