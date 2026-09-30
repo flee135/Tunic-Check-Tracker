@@ -91,11 +91,15 @@ class Tracker:
 
         settings = load_settings()
         self.dark_mode = tk.BooleanVar(value=settings.get("dark_mode", False))
+        self.on_top = tk.BooleanVar(value=settings.get("always_on_top", False))
+        root.attributes("-topmost", self.on_top.get())
         menubar = tk.Menu(root)
         settings_menu = tk.Menu(menubar, tearoff=False)
         settings_menu.add_command(label="Select Log File...", command=self.change_log)
         settings_menu.add_checkbutton(label="Dark mode", variable=self.dark_mode,
                                       command=self.toggle_dark_mode)
+        settings_menu.add_checkbutton(label="Always on top", variable=self.on_top,
+                                      command=self.toggle_on_top)
         menubar.add_cascade(label="Settings", menu=settings_menu)
         root.config(menu=menubar)
 
@@ -148,6 +152,10 @@ class Tracker:
     def toggle_dark_mode(self):
         save_setting("dark_mode", self.dark_mode.get())
         self.apply_theme()
+
+    def toggle_on_top(self):
+        save_setting("always_on_top", self.on_top.get())
+        self.root.attributes("-topmost", self.on_top.get())
 
     def on_click(self, event):
         """Clicking a check toggles it between done and not done."""
