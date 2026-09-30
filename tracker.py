@@ -92,9 +92,9 @@ class Tracker:
         controls.pack(fill="x")
         ttk.Button(controls, text="Expand all", command=lambda: self.set_all_open(True)).pack(side="left")
         ttk.Button(controls, text="Collapse all", command=lambda: self.set_all_open(False)).pack(side="left", padx=(6, 0))
-        self.hide_done = tk.BooleanVar(value=False)
+        self.hide_done = tk.BooleanVar(value=load_settings().get("hide_done", False))
         ttk.Checkbutton(controls, text="Hide completed", variable=self.hide_done,
-                        command=self.mark_dirty).pack(side="right")
+                        command=self.toggle_hide_done).pack(side="right")
 
         frame = ttk.Frame(root)
         frame.pack(fill="both", expand=True)
@@ -122,11 +122,15 @@ class Tracker:
             self.done.add(row)
         self.mark_dirty()
 
+    def toggle_hide_done(self):
+        save_setting("hide_done", self.hide_done.get())
+        self.mark_dirty()
+
     def change_log(self):
         path = ask_log_path(self.root)
         if not path:
             return
-        save_log_path(path)
+        save_setting("log_path", str(path))
         self.tail = LogTail(path)
         self.reset()
         self.scene = None
@@ -232,17 +236,17 @@ class Tracker:
         self.tree.yview_moveto(scroll_pos)
 
 
-def load_log_path():
+def load_settings() -> dict:
     try:
-        settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
-        return None
-    path = settings.get("log_path")
-    return Path(path) if path else None
+        return {}
 
 
-def save_log_path(path: Path):
-    SETTINGS_FILE.write_text(json.dumps({"log_path": str(path)}, indent=2), encoding="utf-8")
+def save_setting(key: str, value):
+    settings = load_settings()
+    settings[key] = value
+    SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
 
 def ask_log_path(parent):
@@ -259,7 +263,8 @@ def ask_log_path(parent):
 def main():
     locations_file = Path(__file__).with_name("locations.json")
     locations = json.loads(locations_file.read_text(encoding="utf-8"))
-    log_path = Path(sys.argv[1]) if len(sys.argv) > 1 else load_log_path()
+    saved_path = load_settings().get("log_path")
+    log_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(saved_path) if saved_path else None
     root = tk.Tk()
     Tracker(root, log_path, locations)
     root.mainloop()
