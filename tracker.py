@@ -35,7 +35,7 @@ SHUFFLE_BITS = {
     "enemy drops": 22,
     "extra enemy drops": 23,
 }
-# Shuffles whose checks are in locations.json.
+# Shuffles whose checks the tracker shows.
 SUPPORTED_SHUFFLES = set()
 # "Picked up item <id> [<scene>] (<item>)". The item name can contain brackets and
 # parentheses, so stop at the first "] (".
@@ -391,7 +391,7 @@ def ask_log_path(parent):
 
 def main():
     locations_file = Path(__file__).with_name("locations.json")
-    locations = json.loads(locations_file.read_text(encoding="utf-8"))
+    locations = json.loads(locations_file.read_text(encoding="utf-8"))["base"]
     saved_path = load_settings().get("log_path")
     log_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(saved_path) if saved_path else None
     root = tk.Tk()
